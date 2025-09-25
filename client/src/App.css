@@ -12,6 +12,10 @@
   animation: bounce 1s infinite;
 }
 
+.bg-blue-600{
+  background-color: darkblue;
+}
+
 @keyframes bounce {
   0%, 20%, 53%, 80%, 100% {
     animation-timing-function: cubic-bezier(0.215, 0.61, 0.355, 1);

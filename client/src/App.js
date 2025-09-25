@@ -58,7 +58,7 @@ function App() {
       case 'dashboard':
         return `📊 ${studentName}'s Dashboard`;
       default:
-        return '🎭 Socratic AI Debate Partner';
+        return '🎭 Socratic AI';
     }
   };
 
