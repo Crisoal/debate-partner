@@ -110,18 +110,18 @@ function PeerDebateArena({ session, onEndDebate, studentName }) {
               studentName: data.studentName,
               studentPosition: data.studentPosition
             };
-            
+
             // Close waiting WebSocket
             if (waitingWsRef.current) {
               waitingWsRef.current.close();
             }
-            
+
             // Update state
             setDebateState('active');
             setParticipantsList(data.participants);
             setCurrentSpeaker(data.currentSpeaker);
             setTimeRemaining(data.timePerTurn);
-            
+
             // Initialize debate WebSocket
             setTimeout(() => {
               initializeDebateWebSocket(data.sessionId);
@@ -240,26 +240,26 @@ function PeerDebateArena({ session, onEndDebate, studentName }) {
   const playOpponentAudio = async (audioDataBase64) => {
     try {
       setIsPlayingOpponentAudio(true);
-      
+
       if (!audioContextRef.current) {
         audioContextRef.current = new (window.AudioContext || window.webkitAudioContext)();
       }
 
       // Convert base64 to ArrayBuffer
       const audioBuffer = Uint8Array.from(atob(audioDataBase64), c => c.charCodeAt(0));
-      
+
       // Decode and play audio
       const decodedAudio = await audioContextRef.current.decodeAudioData(audioBuffer.buffer);
       const source = audioContextRef.current.createBufferSource();
       source.buffer = decodedAudio;
       source.connect(audioContextRef.current.destination);
-      
+
       source.onended = () => {
         setIsPlayingOpponentAudio(false);
       };
-      
+
       source.start();
-      
+
     } catch (error) {
       console.error('Error playing opponent audio:', error);
       setIsPlayingOpponentAudio(false);
@@ -302,93 +302,109 @@ function PeerDebateArena({ session, onEndDebate, studentName }) {
 
   // Enhanced voice recording with real-time streaming
   const startRecording = async () => {
-    if (currentSpeaker !== studentName || isRecording || isProcessing) return;
+    // Enhanced validation before starting
+    if (!session?.sessionId) {
+      alert('No active session. Please refresh the page.');
+      return;
+    }
+
+    if (!studentName) {
+      alert('Student name not found. Please refresh the page.');
+      return;
+    }
+
+    if (currentSpeaker !== studentName) {
+      alert(`It's not your turn to speak. Currently ${currentSpeaker}'s turn.`);
+      return;
+    }
+
+    if (isRecording || isProcessing) {
+      console.log('Already recording or processing, ignoring start request');
+      return;
+    }
 
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ 
+      console.log('Starting recording for student:', studentName, 'in session:', session.sessionId);
+
+      const stream = await navigator.mediaDevices.getUserMedia({
         audio: {
           echoCancellation: true,
           noiseSuppression: true,
           autoGainControl: true
-        } 
+        }
       });
-      
+
+      // Check if MediaRecorder is supported
+      if (!MediaRecorder.isTypeSupported('audio/webm;codecs=opus')) {
+        console.warn('WebM/Opus not supported, falling back to default');
+      }
+
       mediaRecorderRef.current = new MediaRecorder(stream, {
-        mimeType: 'audio/webm;codecs=opus'
+        mimeType: MediaRecorder.isTypeSupported('audio/webm;codecs=opus')
+          ? 'audio/webm;codecs=opus'
+          : undefined
       });
-      
+
       audioChunksRef.current = [];
-      
-      // NEW: Real-time audio streaming
+
       mediaRecorderRef.current.ondataavailable = (event) => {
-        audioChunksRef.current.push(event.data);
-        
-        // Stream audio chunks to opponent in real-time
-        if (event.data.size > 0 && wsRef.current) {
-          const reader = new FileReader();
-          reader.onload = () => {
-            const audioData = reader.result.split(',')[1]; // Remove data URL prefix
-            wsRef.current.send(JSON.stringify({
-              type: 'voice_audio_stream',
-              speakerName: studentName,
-              audioData: audioData,
-              sessionId: session.sessionId
-            }));
-          };
-          reader.readAsDataURL(event.data);
+        if (event.data.size > 0) {
+          audioChunksRef.current.push(event.data);
         }
       };
-      
+
       mediaRecorderRef.current.onstop = handleRecordingStop;
-      mediaRecorderRef.current.onstart = () => {
-        // Notify opponents that this student started speaking
-        if (wsRef.current) {
-          wsRef.current.send(JSON.stringify({
-            type: 'opponent_speaking_start',
-            speakerName: studentName,
-            sessionId: session.sessionId
-          }));
-        }
+
+      mediaRecorderRef.current.onerror = (event) => {
+        console.error('MediaRecorder error:', event.error);
+        alert('Recording error. Please try again.');
+        setIsRecording(false);
       };
-      
-      // Start recording with smaller time slices for real-time streaming
-      mediaRecorderRef.current.start(1000); // 1 second chunks
+
+      mediaRecorderRef.current.start();
       setIsRecording(true);
       setRecordingTime(0);
       setLastTranscription('');
-      
+
       // Start recording timer
       recordingTimerRef.current = setInterval(() => {
         setRecordingTime(prev => {
           if (prev >= 30) { // 30 second limit
+            console.log('Recording time limit reached, stopping');
             stopRecording();
             return 30;
           }
           return prev + 1;
         });
       }, 1000);
-      
+
     } catch (error) {
       console.error('Error starting recording:', error);
-      alert('Unable to access microphone. Please check permissions.');
+
+      if (error.name === 'NotAllowedError') {
+        alert('Microphone permission denied. Please allow microphone access and try again.');
+      } else if (error.name === 'NotFoundError') {
+        alert('No microphone found. Please connect a microphone and try again.');
+      } else {
+        alert(`Unable to access microphone: ${error.message}`);
+      }
     }
   };
 
+  // Enhanced stopRecording function:
   const stopRecording = () => {
     if (mediaRecorderRef.current && isRecording) {
-      mediaRecorderRef.current.stop();
-      mediaRecorderRef.current.stream.getTracks().forEach(track => track.stop());
-      setIsRecording(false);
-      
-      // Notify opponents that this student stopped speaking
-      if (wsRef.current) {
-        wsRef.current.send(JSON.stringify({
-          type: 'opponent_speaking_end',
-          speakerName: studentName,
-          sessionId: session.sessionId
-        }));
+      console.log('Stopping recording for student:', studentName);
+
+      try {
+        mediaRecorderRef.current.stop();
+        mediaRecorderRef.current.stream.getTracks().forEach(track => track.stop());
+      } catch (error) {
+        console.error('Error stopping recording:', error);
       }
-      
+
+      setIsRecording(false);
+
       if (recordingTimerRef.current) {
         clearInterval(recordingTimerRef.current);
       }
@@ -396,25 +412,53 @@ function PeerDebateArena({ session, onEndDebate, studentName }) {
   };
 
   const handleRecordingStop = async () => {
+    // Prevent multiple submissions
+    if (isProcessing) {
+      console.log('Already processing, ignoring duplicate submission');
+      return;
+    }
+
     const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/webm' });
-    
+
     if (audioBlob.size < 1000) {
       alert('Recording too short. Please try again.');
       return;
     }
-    
+
+    // Check if we have valid session data
+    if (!session?.sessionId) {
+      console.error('No valid session ID available');
+      alert('Session error. Please refresh and try again.');
+      return;
+    }
+
+    if (!studentName) {
+      console.error('No student name available');
+      alert('Student name not found. Please refresh and try again.');
+      return;
+    }
+
+    // Check if it's actually the student's turn
+    if (currentSpeaker !== studentName) {
+      console.log('Not student\'s turn, current speaker:', currentSpeaker);
+      alert(`It's not your turn. Currently ${currentSpeaker}'s turn.`);
+      return;
+    }
+
+    console.log('Processing voice argument for student:', studentName, 'in session:', session.sessionId);
     setIsProcessing(true);
-    
+
     try {
-      // Submit voice argument to peer debate endpoint
       const response = await submitPeerVoiceArgument({
         sessionId: session.sessionId,
         audioBlob: audioBlob,
         studentName: studentName
       });
-      
+
+      console.log('Voice argument processed successfully:', response);
+
       setLastTranscription(response.transcription);
-      
+
       if (response.moderatorComment) {
         setModeratorFeedback(response.feedback);
       }
@@ -423,10 +467,20 @@ function PeerDebateArena({ session, onEndDebate, studentName }) {
         setFinalAnalysis(response.finalAnalysis);
         setDebateState('finished');
       }
-      
+
     } catch (error) {
       console.error('Failed to process voice argument:', error);
-      alert('Failed to process your argument. Please try again.');
+
+      // More specific error messages
+      if (error.message.includes('not your turn')) {
+        alert('It\'s not your turn to speak. Please wait for your opponent.');
+      } else if (error.message.includes('transcription')) {
+        alert('Could not understand your speech. Please try speaking more clearly.');
+      } else if (error.message.includes('session')) {
+        alert('Session error. Please refresh the page and try again.');
+      } else {
+        alert(`Failed to process your argument: ${error.message}`);
+      }
     } finally {
       setIsProcessing(false);
     }
@@ -623,11 +677,10 @@ function PeerDebateArena({ session, onEndDebate, studentName }) {
               participantsList.map((participant, index) => (
                 <div
                   key={index}
-                  className={`flex items-center justify-between p-2 rounded mb-2 ${
-                    participant.name === currentSpeaker ? 'bg-green-100 text-green-800' :
+                  className={`flex items-center justify-between p-2 rounded mb-2 ${participant.name === currentSpeaker ? 'bg-green-100 text-green-800' :
                     participant.name === studentName ? 'bg-blue-100 text-blue-800' :
-                    'bg-gray-100 text-gray-700'
-                  }`}
+                      'bg-gray-100 text-gray-700'
+                    }`}
                 >
                   <span className="text-sm font-medium">
                     {participant.name}
@@ -669,25 +722,23 @@ function PeerDebateArena({ session, onEndDebate, studentName }) {
               {messages.map((message) => (
                 <div
                   key={message.id}
-                  className={`flex ${
-                    message.speaker === studentName ? 'justify-end' :
+                  className={`flex ${message.speaker === studentName ? 'justify-end' :
                     message.speaker === 'moderator' ? 'justify-center' : 'justify-start'
-                  }`}
+                    }`}
                 >
                   <div
-                    className={`max-w-3xl p-4 rounded-lg ${
-                      message.speaker === studentName
-                        ? 'bg-blue-500 text-white'
-                        : message.speaker === 'moderator'
-                          ? 'bg-yellow-100 text-yellow-800 border border-yellow-200'
-                          : 'bg-gray-100 text-gray-800 border'
-                    }`}
+                    className={`max-w-3xl p-4 rounded-lg ${message.speaker === studentName
+                      ? 'bg-blue-500 text-white'
+                      : message.speaker === 'moderator'
+                        ? 'bg-yellow-100 text-yellow-800 border border-yellow-200'
+                        : 'bg-gray-100 text-gray-800 border'
+                      }`}
                   >
                     <div className="flex items-center gap-2 mb-2">
                       <span className="font-semibold">
                         {message.speaker === studentName ? '🎤 You' :
                           message.speaker === 'moderator' ? '🤖 AI Moderator' :
-                          `🎤 ${message.speaker}`}
+                            `🎤 ${message.speaker}`}
                       </span>
                       {message.round && (
                         <span className="text-xs bg-black bg-opacity-20 text-current px-2 py-1 rounded-full">
@@ -732,7 +783,7 @@ function PeerDebateArena({ session, onEndDebate, studentName }) {
                     </div>
                     <div className="flex justify-center space-x-1">
                       {[...Array(5)].map((_, i) => (
-                        <div 
+                        <div
                           key={i}
                           className="w-2 h-8 bg-green-400 animate-pulse rounded-full"
                           style={{ animationDelay: `${i * 0.1}s` }}
@@ -749,7 +800,7 @@ function PeerDebateArena({ session, onEndDebate, studentName }) {
                       🔴 Recording... {formatTime(recordingTime)}
                     </div>
                     <div className="w-32 h-2 bg-red-100 rounded-full overflow-hidden">
-                      <div 
+                      <div
                         className="h-full bg-red-500 animate-pulse"
                         style={{ width: `${Math.min((recordingTime / 30) * 100, 100)}%` }}
                       ></div>
