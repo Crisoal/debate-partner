@@ -12,6 +12,7 @@
     "install-all": "npm install && cd client && npm install && cd .."
   },
   "dependencies": {
+    "@google-cloud/speech": "^7.2.0",
     "axios": "^1.12.2",
     "bcryptjs": "^2.4.3",
     "cors": "^2.8.5",
@@ -20,8 +21,10 @@
     "express-rate-limit": "^6.11.2",
     "helmet": "^7.2.0",
     "jsonwebtoken": "^9.0.2",
+    "multer": "^2.0.2",
     "openai": "^4.20.1",
-    "pg": "^8.16.3"
+    "pg": "^8.16.3",
+    "ws": "^8.18.3"
   },
   "devDependencies": {
     "autoprefixer": "^10.4.21",

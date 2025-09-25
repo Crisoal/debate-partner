@@ -122,6 +122,7 @@ jspm_packages/
 *.crt
 credentials.json
 client_secret.json
+infinite-strata-473204-u5-11eb7d0b8208.json
 
 # Misc
 *.tsbuildinfo
